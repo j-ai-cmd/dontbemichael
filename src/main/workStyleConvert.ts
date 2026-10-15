@@ -4,7 +4,7 @@
  * tools does the rewrite; when it can't, the plain-text fallback answers and
  * says so, so hiring never waits on a sign-in problem.
  */
-import { runHiddenClaude } from './hiddenClaude';
+import { runHiddenModel } from './hiddenModel';
 import {
   cleanAnswer,
   focusCheckPrompt,
@@ -66,7 +66,7 @@ export async function convertWorkStyle(req: ConvertRequest, deps: ConvertDeps): 
   const fallback = () => (req.to === 'plain' ? plainFallback(req.text, roleLabel(req.ctx.title)) : instructionsFallback(req.text, req.ctx));
   try {
     const prompt = req.to === 'plain' ? toPlainPrompt(req.text, req.ctx) : toInstructionsPrompt(req.text, req.ctx, req.previous);
-    const result = await runHiddenClaude(prompt, {
+    const result = await runHiddenModel(prompt, {
       model: req.to === 'plain' ? PLAIN_MODEL : INSTRUCTIONS_MODEL,
       cwd: deps.cwd,
       command: deps.command,
@@ -122,7 +122,7 @@ export function readFocusCheckRequest(v: unknown): FocusCheckRequest | null {
  */
 export async function checkFocusArea(req: FocusCheckRequest, deps: ConvertDeps): Promise<{ checked: boolean; conflict?: string }> {
   try {
-    const result = await runHiddenClaude(focusCheckPrompt(req), {
+    const result = await runHiddenModel(focusCheckPrompt(req), {
       model: PLAIN_MODEL,
       cwd: deps.cwd,
       command: deps.command,
@@ -175,7 +175,7 @@ export async function suggestWorkStyle(
   live?: { onText?: (text: string) => void; signal?: AbortSignal }
 ): Promise<{ text: string; cancelled?: boolean }> {
   try {
-    const result = await runHiddenClaude(suggestWorkStylePrompt(req), {
+    const result = await runHiddenModel(suggestWorkStylePrompt(req), {
       model: INSTRUCTIONS_MODEL,
       cwd: deps.cwd,
       command: deps.command,

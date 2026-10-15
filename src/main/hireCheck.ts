@@ -9,7 +9,7 @@
  * answers junk, the instant rules decide instead and the verdict says so, so a
  * sign-in problem never blocks hiring for good.
  */
-import { runHiddenClaude } from './hiddenClaude';
+import { runHiddenModel } from './hiddenModel';
 import {
   distinctPrompt,
   parseDistinctAnswer,
@@ -57,7 +57,7 @@ export async function checkDistinct(job: JobProfile, teamIn: JobProfile[], deps:
   const team = teamIn.slice(0, MAX_TEAM);
   if (team.length === 0) return { distinct: true, overlapsWith: [], why: '', source: 'rules' };
   try {
-    const result = await runHiddenClaude(distinctPrompt(job, team), {
+    const result = await runHiddenModel(distinctPrompt(job, team), {
       model: CHECK_MODEL,
       cwd: deps.cwd,
       command: deps.command,

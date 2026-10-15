@@ -6,7 +6,7 @@
  * so the email goes to the owner instead.
  */
 import { randomBytes } from 'node:crypto';
-import { runHiddenClaude } from './hiddenClaude';
+import { runHiddenModel } from './hiddenModel';
 import { parseStandingFit, standingFitPrompt } from '../shared/mailProposals';
 import type { StandingFitCheck } from './mail';
 
@@ -16,7 +16,7 @@ const TIMEOUT_MS = 60_000;
 export function standingFitCheck(deps: { cwd: () => string; command: () => string; env?: () => Record<string, string> | undefined; log?: (e: Record<string, unknown>) => void }): StandingFitCheck {
   return async (kind, email) => {
     try {
-      const result = await runHiddenClaude(standingFitPrompt(kind, email, randomBytes(6).toString('hex')), {
+      const result = await runHiddenModel(standingFitPrompt(kind, email, randomBytes(6).toString('hex')), {
         model: MODEL,
         cwd: deps.cwd(),
         command: deps.command(),
