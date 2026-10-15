@@ -48,10 +48,19 @@ test('Gemini is not yet ready to be offered, and the gaps say why', () => {
 
 test('the hiddenRunner column matches the runners runHiddenModel really has', () => {
   for (const id of ALL) {
-    if (id === 'custom') continue; // keeps the Claude path, but the app promises nothing for it
+    if (id === 'custom') continue; // its own test below
     const hasRunner = hidden.hiddenRunnerFor(id, true) !== null;
     assert.equal(caps.ENGINE_CAPABILITIES[id].hiddenRunner, hasRunner, `${id}: table says ${caps.ENGINE_CAPABILITIES[id].hiddenRunner}, code says ${hasRunner}`);
   }
+});
+
+test('a custom command keeps the Claude path but the table promises nothing for it', () => {
+  // A custom command is usually a wrapper around claude, so its background
+  // calls keep the path they always had; but the app cannot tell what it
+  // really runs, so it is never counted ready to be offered.
+  assert.equal(hidden.hiddenRunnerFor('custom', true), 'claude');
+  assert.deepEqual(caps.ENGINE_CAPABILITIES.custom, { isolation: 'none', hiddenRunner: false, appMcpServers: false });
+  assert.equal(caps.officeGaps('custom').length, 3);
 });
 
 test('only Claude claims an OS sandbox and the app MCP servers today', () => {
@@ -62,11 +71,7 @@ test('only Claude claims an OS sandbox and the app MCP servers today', () => {
 });
 
 test('the gate refuses an engine that has every capability but folder privacy', () => {
-  const saved = caps.ENGINE_CAPABILITIES.codex;
-  try {
-    caps.ENGINE_CAPABILITIES.codex = { isolation: 'pretooluse-only', hiddenRunner: true, appMcpServers: true };
-    assert.deepEqual(caps.officeGaps('codex'), ['folder privacy is pretooluse-only, needs os-sandbox']);
-  } finally {
-    caps.ENGINE_CAPABILITIES.codex = saved;
-  }
+  const table = { ...caps.ENGINE_CAPABILITIES, codex: { isolation: 'pretooluse-only', hiddenRunner: true, appMcpServers: true } };
+  assert.deepEqual(caps.officeGaps('codex', table), ['folder privacy is pretooluse-only, needs os-sandbox']);
+  assert.deepEqual(caps.officeGaps('codex', { ...table, codex: { ...table.codex, isolation: 'os-sandbox' } }), []);
 });

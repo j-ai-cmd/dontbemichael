@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { codexHiddenArgs } from '../shared/hiddenModelArgs';
+import { hardKillTree } from './procKill';
 import type { HiddenClaudeResult } from './hiddenClaude';
 
 /**
@@ -25,9 +26,6 @@ export interface HiddenCodexOptions {
   signal?: AbortSignal;
 }
 
-/** How much of codex's error output a failure keeps. */
-const STDERR_KEEP = 400;
-
 export function runHiddenCodex(prompt: string, opts: HiddenCodexOptions): Promise<HiddenClaudeResult> {
   return new Promise((resolve) => {
     if (!prompt.trim()) { resolve({ ok: false, error: 'empty prompt' }); return; }
@@ -46,26 +44,33 @@ export function runHiddenCodex(prompt: string, opts: HiddenCodexOptions): Promis
     const fileArgs = winWrap ? ['/c', opts.exe, ...args] : args;
 
     let settled = false;
-    let stderr = '';
-    let child: ChildProcess;
-    let timer: NodeJS.Timeout;
+    let child: ChildProcess | undefined;
+    let timer: NodeJS.Timeout | undefined;
 
-    const finish = (r: HiddenClaudeResult) => {
+    const finish = (r: HiddenClaudeResult, stop: boolean) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       opts.signal?.removeEventListener('abort', onAbort);
-      try { child?.kill('SIGKILL'); } catch { /* already gone */ }
+      // The npm `codex` is a launcher that starts the native binary as its own
+      // child: killing only the launcher would leave the model call running.
+      // On a stop, kill the whole tree (its process group on POSIX, taskkill
+      // /T on Windows). A process that ended on its own is left alone.
+      if (stop && child?.pid) hardKillTree(child.pid);
       try { rmSync(root, { recursive: true, force: true }); } catch { /* next time */ }
       resolve(r);
     };
-    const onAbort = () => finish({ ok: false, error: 'cancelled' });
+    const onAbort = () => finish({ ok: false, error: 'cancelled' }, true);
 
     try {
       child = spawn(file, fileArgs, {
         cwd: work,
         env: (opts.env ?? process.env) as NodeJS.ProcessEnv,
-        stdio: ['pipe', 'ignore', 'pipe'],
+        // Codex's progress output repeats the prompt (the owner's email, a
+        // member's notes), so none of it is kept: an error names only the exit.
+        stdio: ['pipe', 'ignore', 'ignore'],
+        // Its own process group on POSIX, so a stop reaches every descendant.
+        detached: process.platform !== 'win32',
         windowsHide: true
       });
     } catch (e) {
@@ -74,17 +79,15 @@ export function runHiddenCodex(prompt: string, opts: HiddenCodexOptions): Promis
       return;
     }
 
-    timer = setTimeout(() => finish({ ok: false, error: 'hidden session timed out' }), opts.timeoutMs ?? 180_000);
+    timer = setTimeout(() => finish({ ok: false, error: 'hidden session timed out' }, true), opts.timeoutMs ?? 180_000);
     opts.signal?.addEventListener('abort', onAbort);
 
-    child.stderr?.on('data', (d: Buffer) => { stderr = (stderr + d.toString()).slice(-STDERR_KEEP); });
-    child.on('error', (e) => finish({ ok: false, error: e.message }));
-    child.on('close', (code) => {
+    child.on('error', (e) => finish({ ok: false, error: e.message }, false));
+    child.on('close', (code, signal) => {
       let text = '';
       try { text = readFileSync(answerFile, 'utf8').trim(); } catch { /* no answer written */ }
-      if (text) { finish({ ok: true, text }); return; }
-      const why = stderr.trim() || `codex exited with code ${code}`;
-      finish({ ok: false, error: `no answer from codex: ${why}` });
+      if (text) { finish({ ok: true, text }, false); return; }
+      finish({ ok: false, error: `no answer from codex (exit ${code ?? signal})` }, false);
     });
 
     child.stdin?.on('error', () => { /* the process ended first; close reports it */ });

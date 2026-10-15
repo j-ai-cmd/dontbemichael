@@ -99,10 +99,11 @@ test('a Codex call returns the answer file and passes the prompt on stdin', posi
 test('a Codex call with no answer fails, so the caller falls back', posixOnly('a shell script stands in for codex'), async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hidden-codex-'));
   try {
-    const exe = fakeCodex(dir, `process.stderr.write('not signed in'); process.exit(1);`);
-    const r = await runHiddenCodex('hello', { exe, timeoutMs: 10_000 });
-    assert.equal(r.ok, false);
-    assert.match(r.error, /not signed in/);
+    // Codex repeats the prompt in its progress output; a failure must not
+    // carry it into the error, which callers write to the office log.
+    const exe = fakeCodex(dir, `process.stderr.write('user: ' + input + '\\nnot signed in'); process.exit(1);`);
+    const r = await runHiddenCodex('PRIVATE EMAIL BODY', { exe, timeoutMs: 10_000 });
+    assert.deepEqual(r, { ok: false, error: 'no answer from codex (exit 1)' });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -114,6 +115,32 @@ test('a Codex call that runs too long is stopped', posixOnly('a shell script sta
     const exe = fakeCodex(dir, `setTimeout(() => fs.writeFileSync(out, 'late'), 60_000);`);
     const r = await runHiddenCodex('hello', { exe, timeoutMs: 300 });
     assert.deepEqual(r, { ok: false, error: 'hidden session timed out' });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a stopped Codex call ends everything it started', posixOnly('POSIX process groups'), async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hidden-codex-'));
+  const pidFile = path.join(dir, 'grandchild.pid');
+  try {
+    // Like the npm launcher: codex starts the real binary as its own child.
+    const exe = fakeCodex(dir, `const g = require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
+  fs.writeFileSync(${JSON.stringify(pidFile)}, String(g.pid));
+  setTimeout(() => fs.writeFileSync(out, 'late'), 60_000);`);
+    // Stop only once the child exists, however slow the machine is; a timeout
+    // and a cancel take the same stop path.
+    const stop = new AbortController();
+    const watch = setInterval(() => { if (fs.existsSync(pidFile)) stop.abort(); }, 20);
+    const r = await runHiddenCodex('hello', { exe, timeoutMs: 30_000, signal: stop.signal });
+    clearInterval(watch);
+    assert.deepEqual(r, { ok: false, error: 'cancelled' });
+    const pid = Number(fs.readFileSync(pidFile, 'utf8'));
+    let alive = true;
+    for (let i = 0; i < 40 && alive; i++) {
+      try { process.kill(pid, 0); await new Promise((res) => setTimeout(res, 50)); } catch { alive = false; }
+    }
+    assert.equal(alive, false, 'the child codex started is killed too');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -159,7 +186,7 @@ test('on a Claude office the standing check still runs on Claude, with the same 
   assert.equal(calls[0].command, 'claude');
   assert.equal(calls[0].noTools, true);
   assert.equal('engine' in calls[0], false, 'no engine option reaches runHiddenClaude');
-  assert.notEqual(result, undefined);
+  assert.deepEqual(result, { fits: true });
 });
 
 test('on a Gemini office the standing check falls back to Ask me without starting anything', async () => {

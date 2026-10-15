@@ -59,9 +59,13 @@ export const ENGINE_CAPABILITIES: Readonly<Record<AgentProvider, EngineCapabilit
   custom: { ...NOTHING_YET }
 };
 
-/** The capabilities an office member needs before its engine can be offered. */
-export function officeGaps(engine: AgentProvider): string[] {
-  const c = ENGINE_CAPABILITIES[engine];
+/** The capabilities an office member needs before its engine can be offered.
+ *  `table` is for tests that try a row the code does not have yet. */
+export function officeGaps(
+  engine: AgentProvider,
+  table: Readonly<Record<AgentProvider, EngineCapabilities>> = ENGINE_CAPABILITIES
+): string[] {
+  const c = table[engine];
   const gaps: string[] = [];
   if (c.isolation !== 'os-sandbox') gaps.push(`folder privacy is ${c.isolation}, needs os-sandbox`);
   if (!c.hiddenRunner) gaps.push('no runner for background checks');

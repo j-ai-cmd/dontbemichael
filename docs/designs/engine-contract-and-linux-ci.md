@@ -41,6 +41,13 @@ One entry point for every background call: `runHiddenModel(prompt, opts)`.
   plain text rewrite, a skipped tidy up).
 - The Codex runner serves only `noTools` calls. A call that needs tools on a
   non-Claude engine is answered as unavailable, never run with tools on.
+- Codex's progress output repeats the prompt (an owner's email, a member's
+  notes), and callers write a failed call's error to the office log. So that
+  output is never kept: an error names only the exit code.
+- The npm `codex` is a launcher that starts the native binary as its own
+  child. On a timeout or cancel the whole process tree is killed
+  (`hardKillTree`: its process group on POSIX, `taskkill /T` on Windows), so no
+  model call keeps running after the app gave up on it.
 
 The argument list is built by a pure function in `src/shared/hiddenModelArgs.ts`
 so the tests can check it without spawning anything.
