@@ -15,9 +15,10 @@ concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# Every job blocks: a red job fails the run. All four are required checks on
-# main in the "protect main" ruleset (a repository setting the owner changes),
-# so renaming a job here also means renaming its required check there.
+# Every job blocks: a red job fails the run. Every job but test-linux is a
+# required check on main in the "protect main" ruleset (a repository
+# setting the owner changes; test-linux joins it there), so renaming a job
+# here also means renaming its required check there.
 jobs:
   typecheck:
     name: Typecheck
@@ -58,6 +59,25 @@ jobs:
   test-macos:
     name: Tests (macOS)
     runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      # Install scripts must run: they finish the Electron runtime and node-pty.
+      - name: Install dependencies
+        run: npm ci
+      - name: Test suite
+        run: npm run test:focused
+
+  # electron-builder.yml already builds a Linux AppImage; this keeps the suite
+  # green on Linux so that build has tests behind it. POSIX tests run here too;
+  # macOS only tests skip (test/platform.cjs).
+  test-linux:
+    name: Tests (Linux)
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
