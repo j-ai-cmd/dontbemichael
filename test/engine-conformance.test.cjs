@@ -26,6 +26,7 @@ test('every engine has a capability row', () => {
 });
 
 test('every engine this build offers can keep folders private, run background checks and reach the mail tools', () => {
+  // Value: protects=no engine reaches owners while a member's folder, background checks or mail would silently break on it; fails_when=an id is added to BUILD_ENGINES before its row is true; why_new=issue #139; seam=none
   for (const id of ap.BUILD_ENGINES) {
     assert.deepEqual(caps.officeGaps(id), [], `${id} is in BUILD_ENGINES but the app cannot keep its promises there`);
   }
@@ -47,6 +48,7 @@ test('Gemini is not yet ready to be offered, and the gaps say why', () => {
 });
 
 test('the hiddenRunner column matches the runners runHiddenModel really has', () => {
+  // Value: protects=the table cannot claim a runner the code lacks, or hide one it has; fails_when=hiddenRunnerFor and ENGINE_CAPABILITIES drift; why_new=new table; seam=none
   for (const id of ALL) {
     if (id === 'custom') continue; // its own test below
     const hasRunner = hidden.hiddenRunnerFor(id, true) !== null;

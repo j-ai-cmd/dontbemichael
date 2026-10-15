@@ -18,7 +18,7 @@ const loadTs = require('./load-ts.cjs');
 const { posixOnly } = require('./platform.cjs');
 
 const args = loadTs('src/shared/hiddenModelArgs.ts');
-const { runHiddenCodex } = loadTs('src/main/hiddenCodex.ts');
+const { runHiddenCodex, codexLaunch } = loadTs('src/main/hiddenCodex.ts');
 
 test('the office command picks the engine, and an explicit engine wins', () => {
   assert.equal(args.hiddenEngine('claude'), 'claude');
@@ -46,6 +46,7 @@ test('every other engine has no runner, so the caller falls back at once', () =>
 });
 
 test('the Codex call keeps every safety flag tested in issue #85', () => {
+  // Value: protects=a check that reads an owner's email or agents' notes can never run a shell, browse or reach apps; fails_when=a flag is dropped or the prompt moves onto argv; why_new=new Codex runner; seam=none
   const a = args.codexHiddenArgs('/tmp/work', '/tmp/answer.txt');
   assert.equal(a[0], 'exec');
   for (const flag of ['--ephemeral', '--ignore-user-config', '--skip-git-repo-check']) assert.ok(a.includes(flag), flag);
@@ -99,6 +100,7 @@ test('a Codex call returns the answer file and passes the prompt on stdin', posi
 test('a Codex call with no answer fails, so the caller falls back', posixOnly('a shell script stands in for codex'), async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hidden-codex-'));
   try {
+    // Value: protects=the owner's private email never reaches the office log agents read; fails_when=codex output is copied into the error; why_new=found in review pass 2; seam=fake codex
     // Codex repeats the prompt in its progress output; a failure must not
     // carry it into the error, which callers write to the office log.
     const exe = fakeCodex(dir, `process.stderr.write('user: ' + input + '\\nnot signed in'); process.exit(1);`);
@@ -124,6 +126,7 @@ test('a stopped Codex call ends everything it started', posixOnly('POSIX process
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hidden-codex-'));
   const pidFile = path.join(dir, 'grandchild.pid');
   try {
+    // Value: protects=a timed out or cancelled check stops spending the owner's quota; fails_when=only the launcher is killed and its child keeps the model call running; why_new=found in review pass 2; seam=fake codex
     // Like the npm launcher: codex starts the real binary as its own child.
     const exe = fakeCodex(dir, `const g = require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
   fs.writeFileSync(${JSON.stringify(pidFile)}, String(g.pid));
@@ -159,6 +162,39 @@ test('a cancelled Codex call answers cancelled', posixOnly('a shell script stand
   }
 });
 
+test('on Windows the npm codex launcher runs through cmd.exe with paths with spaces kept whole', () => {
+  // Value: protects=a Windows owner whose user name has a space still gets Codex checks; fails_when=the work folder or answer file splits at the space; why_new=the first version passed /c with Node's own quoting; seam=none
+  const exe = 'C:\\Users\\Jai D\\AppData\\Roaming\\npm\\codex.cmd';
+  const work = 'C:\\Users\\Jai D\\AppData\\Local\\Temp\\dbm-hidden-codex-1\\work';
+  const l = codexLaunch('win32', exe, args.codexHiddenArgs(work, 'C:\\Users\\Jai D\\x\\answer.txt'), 'C:\\Windows\\system32\\cmd.exe');
+  assert.equal(l.file, 'C:\\Windows\\system32\\cmd.exe');
+  assert.equal(l.windowsVerbatimArguments, true);
+  assert.equal(l.args.length, 1);
+  assert.ok(l.args[0].startsWith('/d /s /c "'), l.args[0]);
+  assert.ok(l.args[0].includes(`"${exe}"`), 'launcher path quoted whole');
+  assert.ok(l.args[0].includes(`-C "${work}"`), 'work folder quoted whole');
+});
+
+test('a real codex.exe and every other platform start directly with an argument array', () => {
+  const a = ['exec', '-'];
+  assert.deepEqual(codexLaunch('win32', 'C:\\tools\\codex.exe', a), { file: 'C:\\tools\\codex.exe', args: a });
+  assert.deepEqual(codexLaunch('linux', '/usr/local/bin/codex', a), { file: '/usr/local/bin/codex', args: a });
+  assert.deepEqual(codexLaunch('darwin', '/opt/homebrew/bin/codex', a), { file: '/opt/homebrew/bin/codex', args: a });
+});
+
+test('no temp folder means a failed call, never a thrown one', posixOnly('TMPDIR steers os.tmpdir() on POSIX'), async () => {
+  // Value: protects=a full disk or blocked temp folder sends the email to Ask me instead of crashing the check; fails_when=mkdtemp throws out of the promise; why_new=found in review pass 3; seam=TMPDIR
+  const saved = process.env.TMPDIR;
+  process.env.TMPDIR = path.join(os.tmpdir(), 'does-not-exist-' + process.pid);
+  try {
+    const r = await runHiddenCodex('hello', { exe: '/nonexistent/codex', timeoutMs: 1_000 });
+    assert.equal(r.ok, false);
+    assert.match(r.error, /ENOENT/);
+  } finally {
+    if (saved === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = saved;
+  }
+});
+
 test('an empty prompt never starts Codex', async () => {
   const r = await runHiddenCodex('   ', { exe: '/nonexistent/codex', timeoutMs: 1_000 });
   assert.deepEqual(r, { ok: false, error: 'empty prompt' });
@@ -190,6 +226,7 @@ test('on a Claude office the standing check still runs on Claude, with the same 
 });
 
 test('on a Gemini office the standing check falls back to Ask me without starting anything', async () => {
+  // Value: protects=an email under a standing approval on an engine with no runner goes to the owner; fails_when=Claude's flags are sent to another CLI or the check answers yes; why_new=issue #85; seam=runHiddenClaude stubbed
   const log = [];
   const { result, calls } = await claudeCalls(() => standingFitCheck({ cwd: () => '/tmp', command: () => 'gemini', log: (e) => log.push(e) })('reply', { to: ['a@b.c'], subject: 's', body: 'b' }));
   assert.equal(calls.length, 0, 'Claude is never started with the gemini command');

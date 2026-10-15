@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { codexHiddenArgs } from '../shared/hiddenModelArgs';
 import { hardKillTree } from './procKill';
+import { buildCmdCommandLine, type ProcessLaunch } from './pty';
 import type { HiddenClaudeResult } from './hiddenClaude';
 
 /**
@@ -26,22 +27,35 @@ export interface HiddenCodexOptions {
   signal?: AbortSignal;
 }
 
+/** How to start codex. On Windows an npm install puts a `codex.cmd` launcher
+ *  on PATH, which only cmd.exe can start; it gets the same quoting agents'
+ *  terminals use (buildCmdCommandLine), so a folder under a user name with a
+ *  space stays one argument. A real codex.exe, and every other platform,
+ *  starts directly with an argument array. */
+export function codexLaunch(platform: NodeJS.Platform, exe: string, args: string[], comSpec = 'cmd.exe'): ProcessLaunch {
+  if (platform === 'win32' && !/\.(exe|com)$/i.test(exe)) {
+    return { file: comSpec, args: [buildCmdCommandLine(exe, args)], windowsVerbatimArguments: true };
+  }
+  return { file: exe, args };
+}
+
 export function runHiddenCodex(prompt: string, opts: HiddenCodexOptions): Promise<HiddenClaudeResult> {
   return new Promise((resolve) => {
     if (!prompt.trim()) { resolve({ ok: false, error: 'empty prompt' }); return; }
     if (opts.signal?.aborted) { resolve({ ok: false, error: 'cancelled' }); return; }
 
-    const root = mkdtempSync(join(tmpdir(), 'dbm-hidden-codex-'));
+    let root: string;
+    try {
+      root = mkdtempSync(join(tmpdir(), 'dbm-hidden-codex-'));
+      mkdirSync(join(root, 'work'));
+    } catch (e) {
+      // No temp folder (full disk, no access): the caller's fallback answers.
+      resolve({ ok: false, error: e instanceof Error ? e.message : String(e) });
+      return;
+    }
     const work = join(root, 'work');
-    mkdirSync(work);
     const answerFile = join(root, 'answer.txt');
-    const args = codexHiddenArgs(work, answerFile);
-
-    // Windows: an npm `.cmd` shim can't be spawned directly; route it through
-    // cmd.exe, as runHiddenClaude does (#22). A real codex.exe starts directly.
-    const winWrap = process.platform === 'win32' && !/\.(exe|com)$/i.test(opts.exe);
-    const file = winWrap ? (process.env.ComSpec || 'cmd.exe') : opts.exe;
-    const fileArgs = winWrap ? ['/c', opts.exe, ...args] : args;
+    const launch = codexLaunch(process.platform, opts.exe, codexHiddenArgs(work, answerFile), process.env.ComSpec || 'cmd.exe');
 
     let settled = false;
     let child: ChildProcess | undefined;
@@ -63,8 +77,9 @@ export function runHiddenCodex(prompt: string, opts: HiddenCodexOptions): Promis
     const onAbort = () => finish({ ok: false, error: 'cancelled' }, true);
 
     try {
-      child = spawn(file, fileArgs, {
+      child = spawn(launch.file, launch.args, {
         cwd: work,
+        windowsVerbatimArguments: launch.windowsVerbatimArguments,
         env: (opts.env ?? process.env) as NodeJS.ProcessEnv,
         // Codex's progress output repeats the prompt (the owner's email, a
         // member's notes), so none of it is kept: an error names only the exit.
