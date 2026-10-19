@@ -129,6 +129,7 @@ import {
   installInfoForProvider,
   type AgentProvider
 } from '../shared/agentProvider';
+import { hiddenCallCommand } from '../shared/hiddenModelArgs';
 import { buildMissingCliScript, chooseInstallRung, installSucceeded } from './cliInstall';
 import { detectNodeVersion, nodeIsUsable, resolveNodeInstaller } from './nodeInstall';
 import { toolCatalog, type ToolStatus } from '../shared/toolCatalog';
@@ -499,7 +500,7 @@ const knowledge = new KnowledgeManager();
 // the background. It replaces the old whole-file condenser (reflect.ts).
 const memoryTidy = new MemoryTidy(
   () => readConfig().harnessHome,
-  () => readConfig().defaultCommand ?? 'claude',
+  () => hiddenCallCommand(readConfig()),
   () => memory.env(),
   () => isFloorQuiet(300_000),
   (id) => hive.registry().agents[id]?.name ?? id,
@@ -624,7 +625,7 @@ const standingFit = standingFitCheck({
     try { ensureClaudePermissionsAccepted(dir); } catch { /* the check fails closed */ }
     return dir;
   },
-  command: () => readConfig().defaultCommand ?? 'claude',
+  command: () => hiddenCallCommand(readConfig()),
   env: () => memory.env(),
   log: (event) => { try { hive.appendLog(event); } catch { /* best-effort */ } }
 });
@@ -5658,7 +5659,7 @@ ipcMain.handle('hire:checkDistinct', async (_evt, payload: unknown) => {
   try {
     return await checkDistinct(job, team, {
       cwd: cfg.harnessHome ?? app.getPath('home'),
-      command: cfg.defaultCommand ?? 'claude',
+      command: hiddenCallCommand(cfg),
       env: memory.env(),
       log: (event) => { try { hive.appendLog(event); } catch { /* best-effort */ } },
       signal: stop.signal
@@ -5687,7 +5688,7 @@ ipcMain.handle('workStyle:suggest', async (evt, payload: unknown) => {
   try {
     return await suggestWorkStyle(req, {
       cwd: cfg.harnessHome ?? app.getPath('home'),
-      command: cfg.defaultCommand ?? 'claude',
+      command: hiddenCallCommand(cfg),
       env: memory.env(),
       log: (event) => { try { hive.appendLog(event); } catch { /* best-effort */ } }
     }, {
@@ -5710,7 +5711,7 @@ ipcMain.handle('workStyle:convert', async (_evt, payload: unknown) => {
   const cfg = readConfig();
   return convertWorkStyle(req, {
     cwd: cfg.harnessHome ?? app.getPath('home'),
-    command: cfg.defaultCommand ?? 'claude',
+    command: hiddenCallCommand(cfg),
     env: memory.env(),
     log: (event) => { try { hive.appendLog(event); } catch { /* best-effort */ } }
   });
@@ -5735,7 +5736,7 @@ ipcMain.handle('workStyle:checkFocus', async (_evt, payload: unknown) => {
   }
   return checkFocusArea(req, {
     cwd: cfg.harnessHome ?? app.getPath('home'),
-    command: cfg.defaultCommand ?? 'claude',
+    command: hiddenCallCommand(cfg),
     env: memory.env(),
     log: (event) => { try { hive.appendLog(event); } catch { /* best-effort */ } }
   });

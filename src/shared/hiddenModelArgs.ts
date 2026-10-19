@@ -5,7 +5,7 @@
  *
  * Pure and electron-free, so the tests check it without spawning anything.
  */
-import { inferAgentProvider, type AgentProvider } from './agentProvider';
+import { inferAgentProvider, providerPreset, type AgentProvider } from './agentProvider';
 
 export type HiddenRunner = 'claude' | 'codex';
 
@@ -13,6 +13,20 @@ export type HiddenRunner = 'claude' | 'codex';
  *  office command names (the same rule the rest of the app uses). */
 export function hiddenEngine(command: string | undefined, explicit?: unknown): AgentProvider {
   return inferAgentProvider(command, explicit);
+}
+
+/** The command background calls run with. Issue #85: the engine is Michael's
+ *  (`godProvider`), not the command new hires get (`defaultCommand`). Changing
+ *  Michael's engine in the Command Center sets only godProvider, so an office
+ *  whose Michael runs on Codex can still have defaultCommand 'claude'.
+ *  The office command is kept when it already names Michael's engine, and a
+ *  custom command counts as Claude, as it always has (a wrapper around claude). */
+export function hiddenCallCommand(cfg: { defaultCommand?: string; godProvider?: AgentProvider }): string {
+  const god = cfg.godProvider ?? 'claude';
+  const cmd = (cfg.defaultCommand ?? '').trim();
+  const named = inferAgentProvider(cmd);
+  if (cmd && (named === god || (god === 'claude' && named === 'custom'))) return cmd;
+  return providerPreset(god).defaultCommand || cmd || 'claude';
 }
 
 /** Claude serves every call. A custom command keeps the Claude path it always

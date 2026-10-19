@@ -18,7 +18,7 @@ const loadTs = require('./load-ts.cjs');
 const { posixOnly } = require('./platform.cjs');
 
 const args = loadTs('src/shared/hiddenModelArgs.ts');
-const { runHiddenCodex, codexLaunch } = loadTs('src/main/hiddenCodex.ts');
+const { runHiddenCodex, codexLaunch, sweepStaleCodexDirs } = loadTs('src/main/hiddenCodex.ts');
 
 test('the office command picks the engine, and an explicit engine wins', () => {
   assert.equal(args.hiddenEngine('claude'), 'claude');
@@ -26,6 +26,28 @@ test('the office command picks the engine, and an explicit engine wins', () => {
   assert.equal(args.hiddenEngine('gemini'), 'gemini');
   assert.equal(args.hiddenEngine(undefined), 'claude');
   assert.equal(args.hiddenEngine('claude', 'codex'), 'codex');
+});
+
+test("background calls follow Michael's engine, not the command new hires get", () => {
+  // Value: protects=an office whose Michael runs on Codex gets its checks on Codex; fails_when=the engine is read from defaultCommand, which the Command Center engine switch never changes; why_new=found in review pass 4 (issue #85 names Michael's preset); seam=none
+  assert.equal(args.hiddenCallCommand({ defaultCommand: 'claude', godProvider: 'codex' }), 'codex');
+  assert.equal(args.hiddenCallCommand({ defaultCommand: 'codex', godProvider: 'claude' }), 'claude');
+  assert.equal(args.hiddenCallCommand({ defaultCommand: '/opt/bin/codex --profile x', godProvider: 'codex' }), '/opt/bin/codex --profile x');
+  assert.equal(args.hiddenCallCommand({ defaultCommand: 'gemini', godProvider: 'gemini' }), 'gemini');
+});
+
+test('a Claude office keeps its own command, and a custom wrapper still counts as Claude', () => {
+  assert.equal(args.hiddenCallCommand({ defaultCommand: 'claude' }), 'claude');
+  assert.equal(args.hiddenCallCommand({}), 'claude');
+  assert.equal(args.hiddenCallCommand({ defaultCommand: '/usr/local/bin/my-claude-wrapper', godProvider: 'claude' }), '/usr/local/bin/my-claude-wrapper');
+  assert.equal(args.hiddenCallCommand({ defaultCommand: '  ', godProvider: 'claude' }), 'claude');
+});
+
+test('every hidden call in index.ts takes its command from hiddenCallCommand', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '../src/main/index.ts'), 'utf8');
+  // The four IPC handlers, the standing check and the memory tidy up.
+  assert.equal((src.match(/hiddenCallCommand\((cfg|readConfig\(\))\)/g) || []).length, 6);
+  assert.doesNotMatch(src, /command: cfg\.defaultCommand \?\? 'claude'/);
 });
 
 test('Claude serves every call; a custom command keeps the Claude path it had', () => {
@@ -192,6 +214,29 @@ test('no temp folder means a failed call, never a thrown one', posixOnly('TMPDIR
     assert.match(r.error, /ENOENT/);
   } finally {
     if (saved === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = saved;
+  }
+});
+
+test('call folders a crash left behind are removed, live ones are kept', posixOnly('TMPDIR steers os.tmpdir() on POSIX'), () => {
+  // Value: protects=what the model said about an owner's email does not sit in the temp folder after a crash; fails_when=stale dbm-hidden-codex folders are never swept, or a live call's folder is; why_new=found in review pass 4; seam=TMPDIR
+  const saved = process.env.TMPDIR;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sweep-'));
+  process.env.TMPDIR = tmp;
+  try {
+    const stale = path.join(tmp, 'dbm-hidden-codex-old');
+    const live = path.join(tmp, 'dbm-hidden-codex-new');
+    const other = path.join(tmp, 'someone-else-old');
+    for (const d of [stale, live, other]) { fs.mkdirSync(d); fs.writeFileSync(path.join(d, 'answer.txt'), 'NO: private'); }
+    const twoHoursAgo = (Date.now() - 2 * 60 * 60_000) / 1000;
+    fs.utimesSync(stale, twoHoursAgo, twoHoursAgo);
+    fs.utimesSync(other, twoHoursAgo, twoHoursAgo);
+    sweepStaleCodexDirs(Date.now(), true);
+    assert.equal(fs.existsSync(stale), false, 'stale call folder removed');
+    assert.equal(fs.existsSync(live), true, 'a live call keeps its folder');
+    assert.equal(fs.existsSync(other), true, 'nothing else in the temp folder is touched');
+  } finally {
+    if (saved === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = saved;
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 

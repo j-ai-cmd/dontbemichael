@@ -30,8 +30,11 @@ Together they close three of them without adding any engine to `BUILD_ENGINES`:
 
 One entry point for every background call: `runHiddenModel(prompt, opts)`.
 
-- The engine comes from `opts.engine`, else from the office command
-  (`inferAgentProvider(opts.command)`, the same rule the rest of the app uses).
+- The engine is Michael's (`godProvider`), as issue #85 asks: `index.ts`
+  passes `hiddenCallCommand(config)`, which keeps the office command when it
+  already names Michael's engine and otherwise uses that engine's own command.
+  The Command Center engine switch changes only `godProvider`, so reading
+  `defaultCommand` alone would send a Codex office's checks to Claude.
 - **Claude** keeps the current path unchanged: the call goes to
   `runHiddenClaude` with the same options.
 - **Codex** runs `codex exec` with the flags tested in issue #85 (every tool

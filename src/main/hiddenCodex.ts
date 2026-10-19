@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { codexHiddenArgs } from '../shared/hiddenModelArgs';
@@ -39,14 +39,36 @@ export function codexLaunch(platform: NodeJS.Platform, exe: string, args: string
   return { file: exe, args };
 }
 
+/** Each call's folder name starts with this, under the OS temp folder. */
+const DIR_PREFIX = 'dbm-hidden-codex-';
+/** A call folder older than this was left by a crash or a kill, not a live call. */
+const STALE_MS = 60 * 60_000;
+let staleSwept = false;
+
+/** Remove call folders a crash left behind, once per launch, as the trust
+ *  check sweeps its transcripts: their answer file holds what the model said
+ *  about an owner's email, and an agent's shell can read the temp folder. */
+export function sweepStaleCodexDirs(now = Date.now(), force = false): void {
+  if (staleSwept && !force) return;
+  staleSwept = true;
+  const root = tmpdir();
+  let names: string[] = [];
+  try { names = readdirSync(root); } catch { return; }
+  for (const n of names) {
+    if (!n.startsWith(DIR_PREFIX)) continue;
+    try { if (lstatSync(join(root, n)).mtimeMs < now - STALE_MS) rmSync(join(root, n), { recursive: true, force: true }); } catch { /* next launch */ }
+  }
+}
+
 export function runHiddenCodex(prompt: string, opts: HiddenCodexOptions): Promise<HiddenClaudeResult> {
   return new Promise((resolve) => {
     if (!prompt.trim()) { resolve({ ok: false, error: 'empty prompt' }); return; }
     if (opts.signal?.aborted) { resolve({ ok: false, error: 'cancelled' }); return; }
 
+    sweepStaleCodexDirs();
     let root: string;
     try {
-      root = mkdtempSync(join(tmpdir(), 'dbm-hidden-codex-'));
+      root = mkdtempSync(join(tmpdir(), DIR_PREFIX));
       mkdirSync(join(root, 'work'));
     } catch (e) {
       // No temp folder (full disk, no access): the caller's fallback answers.

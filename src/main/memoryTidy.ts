@@ -73,7 +73,7 @@ export class MemoryTidy {
 
   /**
    * @param getHome      harnessHome, read lazily so the tidy-up follows the office.
-   * @param getCommand   The office command: it names the engine (runHiddenModel), and only its binary is used.
+   * @param getCommand   The command for background calls (hiddenCallCommand: Michael's engine); only its binary is used.
    * @param getEnv       Extra env for the headless call.
    * @param isIdle       Whether the office is quiet right now.
    * @param nameOf       An agent's display name, for the index heading.
