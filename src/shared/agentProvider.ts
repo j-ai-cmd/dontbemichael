@@ -60,6 +60,14 @@ export type BridgeDescriptor =
       inboxDelivery: 'terminal' | 'serve';
     };
 
+/** How a team member's folder privacy is enforced on an engine (issue #139):
+ *  - 'os-sandbox'      the OS sandbox plus the app's deny rules, so a shell
+ *                      command is held to the folder rules too.
+ *  - 'pretooluse-only' a hook checks each file tool call; a shell command is
+ *                      not held to the folder rules.
+ *  - 'none'            the app enforces no folder privacy on this engine. */
+export type EngineIsolation = 'os-sandbox' | 'pretooluse-only' | 'none';
+
 export interface AgentProviderPreset {
   id: AgentProvider;
   label: string;
@@ -119,6 +127,11 @@ export interface AgentProviderPreset {
    *  Distinct from hiveAware: agy/codex/grok are NOT hiveAware (no Claude injection)
    *  but CAN receive inbox via their bridge. */
   canReceiveInbox: boolean;
+  /** Folder privacy this engine proves on macOS and Linux (issue #139). Record
+   *  today's code, not plans: raise it only in the change that makes it true,
+   *  with the test that proves it. BUILD_ENGINES admits only 'os-sandbox'
+   *  (test/engine-readiness.test.cjs). Windows: see engineIsolation. */
+  isolation: EngineIsolation;
   /** For non-hive-aware CLIs that still take an INITIAL prompt to orient the
    *  session (Antigravity's `agy -i "<prompt>"`), the flag to pass it under. The
    *  hive identity+protocol rides in as the first turn — the closest thing to
@@ -188,6 +201,7 @@ export function showByokSettings(engines: readonly AgentProvider[] = BUILD_ENGIN
 export const AGENT_PROVIDER_PRESETS: AgentProviderPreset[] = [
   {
     id: 'claude',
+    isolation: 'os-sandbox',
     label: 'Claude Code',
     defaultCommand: 'claude',
     commandGroups: CLAUDE_COMMAND_GROUPS,
@@ -215,6 +229,7 @@ export const AGENT_PROVIDER_PRESETS: AgentProviderPreset[] = [
   },
   {
     id: 'codex',
+    isolation: 'none',
     label: 'Codex · GPT',
     defaultCommand: 'codex',
     commandGroups: CODEX_COMMAND_GROUPS,
@@ -266,6 +281,7 @@ export const AGENT_PROVIDER_PRESETS: AgentProviderPreset[] = [
   },
   {
     id: 'grok',
+    isolation: 'none',
     label: 'Grok · xAI',
     defaultCommand: 'grok',
     commandGroups: GROK_COMMAND_GROUPS,
@@ -290,6 +306,7 @@ export const AGENT_PROVIDER_PRESETS: AgentProviderPreset[] = [
   },
   {
     id: 'kimi',
+    isolation: 'none',
     label: 'Kimi Code',
     defaultCommand: 'kimi',
     commandGroups: [],
@@ -311,6 +328,7 @@ export const AGENT_PROVIDER_PRESETS: AgentProviderPreset[] = [
     // open-source `@google/gemini-cli` binary and uses Gemini's native settings
     // hooks (BeforeTool/AfterTool/BeforeAgent/AfterAgent/SessionStart).
     id: 'gemini',
+    isolation: 'none',
     label: 'Gemini CLI',
     defaultCommand: 'gemini',
     commandGroups: [],
@@ -331,6 +349,7 @@ export const AGENT_PROVIDER_PRESETS: AgentProviderPreset[] = [
   },
   {
     id: 'antigravity',
+    isolation: 'none',
     label: 'Antigravity · Gemini',
     defaultCommand: 'agy',
     commandGroups: [],
@@ -352,6 +371,7 @@ export const AGENT_PROVIDER_PRESETS: AgentProviderPreset[] = [
     // endpoint (OPENAI_BASE_URL). It has no hook surface, so it rides a PROXY
     // bridge (bridge.kind==='proxy'), with the OpenAI usage/tool-call shape.
     id: 'qwen',
+    isolation: 'none',
     label: 'Qwen (local available)',
     defaultCommand: 'qwen',
     commandGroups: [],
@@ -379,6 +399,7 @@ export const AGENT_PROVIDER_PRESETS: AgentProviderPreset[] = [
     // ex sst/opencode). NOT the archived Go opencode-ai/opencode (→ Crush). Run as
     // its interactive TUI in a PTY (like codex), oriented by --prompt.
     id: 'opencode',
+    isolation: 'none',
     label: 'OpenCode',
     defaultCommand: 'opencode',
     commandGroups: [],
@@ -450,6 +471,7 @@ export const AGENT_PROVIDER_PRESETS: AgentProviderPreset[] = [
     // hooks bridge can't drain on turn-end. Hence a PROXY bridge (qwen tier): a
     // loopback sidecar observes its LLM traffic and SYNTHESIZES the Stop→drain.
     id: 'crush',
+    isolation: 'none',
     label: 'Crush · Charm',
     defaultCommand: 'crush',
     commandGroups: [],
@@ -495,6 +517,7 @@ export const AGENT_PROVIDER_PRESETS: AgentProviderPreset[] = [
     // via a bundled per-agent extension (installPiHooks) that posts HIVE_SOCK payloads
     // and auto-approves tools — a `hooks` bridge with a new `pi` shim.
     id: 'pi',
+    isolation: 'none',
     label: 'Pi',
     defaultCommand: 'pi',
     commandGroups: [],
@@ -539,6 +562,7 @@ export const AGENT_PROVIDER_PRESETS: AgentProviderPreset[] = [
     // done). Non-hiveAware: it has no --append-system-prompt/--settings, so the
     // hive identity+protocol rides in as the initial prompt via `-p`.
     id: 'copilot',
+    isolation: 'none',
     label: 'Copilot',
     defaultCommand: 'copilot',
     commandGroups: [],
@@ -572,6 +596,7 @@ export const AGENT_PROVIDER_PRESETS: AgentProviderPreset[] = [
     // Models (including cheap gpt-5.6-luna-*) bill against Cursor credits via the
     // logged-in CLI — there is no separate "plain OpenAI API" path for Luna.
     id: 'cursor',
+    isolation: 'none',
     label: 'Cursor',
     defaultCommand: 'cursor-agent',
     commandGroups: [],
@@ -603,6 +628,7 @@ export const AGENT_PROVIDER_PRESETS: AgentProviderPreset[] = [
   },
   {
     id: 'custom',
+    isolation: 'none',
     label: 'Custom',
     defaultCommand: '',
     commandGroups: [],
@@ -647,6 +673,16 @@ export function isClaudeProvider(provider: AgentProvider | undefined): boolean {
 /** Whether this provider takes the hive's Claude-only identity injection. */
 export function isHiveAwareProvider(provider: AgentProvider | undefined): boolean {
   return providerPreset(provider ?? 'claude').hiveAware;
+}
+
+/** The folder privacy an engine gives on this platform (issue #139). Claude
+ *  Code has no OS sandbox on Windows: the app writes the same settings, but
+ *  only its PreToolUse hook holds file tools to the folder rules there
+ *  (test/office-privacy-conformance.test.cjs), so an OS sandbox counts as a
+ *  PreToolUse check only. */
+export function engineIsolation(provider: AgentProvider, platform: string = process.platform): EngineIsolation {
+  const isolation = providerPreset(provider).isolation;
+  return platform === 'win32' && isolation === 'os-sandbox' ? 'pretooluse-only' : isolation;
 }
 
 /** Whether the router may deliver inbox mail to this provider (else bounce to
